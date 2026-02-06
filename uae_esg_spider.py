@@ -21,76 +21,44 @@ class UaeEsgSpider(scrapy.Spider):
 
     keywords = [
         "sustainability",
-        "sustainable",
         "esg",
+        "environmental social governance",
         "environmental, social and governance",
-        "environmental social and governance",
         "corporate social responsibility",
         "csr",
-        "sustainability report",
-        "sustainability reporting",
-        "sustainability strategy",
-        "sustainability initiatives",
-        "environmental responsibility",
-        "environmental stewardship",
         "climate action",
-        "climate change",
-        "climate strategy",
         "net zero",
         "net-zero",
         "decarbonization",
         "decarbonisation",
-        "carbon reduction",
         "carbon footprint",
         "greenhouse gas",
         "ghg emissions",
-        "emissions reduction",
         "renewable energy",
         "energy efficiency",
-        "clean energy",
-        "green energy",
-        "circular economy",
-        "responsible sourcing",
-        "responsible procurement",
-        "sustainable procurement",
-        "supplier sustainability",
         "ethical business",
-        "business ethics",
-        "ethics and compliance",
-        "code of conduct",
-        "anti-corruption",
-        "anti bribery",
-        "anti-bribery",
-        "human rights",
-        "diversity and inclusion",
-        "diversity, equity and inclusion",
-        "occupational health and safety",
-        "health and safety",
-        "employee wellbeing",
-        "community engagement",
-        "social impact",
+        "responsible sourcing",
         "impact report",
-        "impact reporting",
-        "sustainability disclosure",
+        "sustainability report",
         "esg report",
-        "esg reporting",
-        "environmental policy",
         "sustainability policy",
+        "environmental policy",
     ]
 
     search_queries = [
-        "UAE company sustainability",
-        "Dubai ESG report",
-        "UAE corporate social responsibility",
-        "Dubai net zero strategy company",
-        "UAE ethical business report",
-        "UAE responsible sourcing",
-        "Dubai impact report",
+        "UAE company ESG",
+        "Dubai sustainability report company",
+        "UAE corporate social responsibility company",
+        "UAE net zero company",
+        "Dubai climate action company",
+        "UAE impact report company",
+        "site:.ae sustainability report",
     ]
 
     max_search_pages = 3
     max_pages_per_domain = 25
     max_depth = 2
+    uae_only = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -104,6 +72,8 @@ class UaeEsgSpider(scrapy.Spider):
             self.max_pages_per_domain = int(kwargs["max_pages_per_domain"])
         if "max_depth" in kwargs:
             self.max_depth = int(kwargs["max_depth"])
+        if "uae_only" in kwargs:
+            self.uae_only = str(kwargs["uae_only"]).lower() in {"1", "true", "yes"}
 
     def start_requests(self):
         yield from self._build_start_requests()
@@ -149,7 +119,7 @@ class UaeEsgSpider(scrapy.Spider):
             domain = self._normalize_domain(parsed.netloc)
             if not domain:
                 continue
-            if not self._is_uae_domain(domain, url):
+            if self.uae_only and not self._is_uae_domain(domain, url):
                 continue
             if domain in self.domain_seen:
                 continue
