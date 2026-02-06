@@ -58,6 +58,13 @@ class UaeEsgSpider(scrapy.Spider):
             self.max_depth = int(kwargs["max_depth"])
 
     def start_requests(self):
+        yield from self._build_start_requests()
+
+    async def start(self):
+        for request in self._build_start_requests():
+            yield request
+
+    def _build_start_requests(self):
         for query in self.search_queries:
             for page in range(self.max_search_pages):
                 offset = page * 30
@@ -67,7 +74,7 @@ class UaeEsgSpider(scrapy.Spider):
     def parse_search(self, response):
         result_links = response.css("a.result__a::attr(href)").getall()
         for link in result_links:
-            url = response.urljoin(link)
+            url = self._extract_duckduckgo_target(response.urljoin(link))
             domain = urllib.parse.urlparse(url).netloc
             if not domain:
                 continue
@@ -129,6 +136,16 @@ class UaeEsgSpider(scrapy.Spider):
     def _duckduckgo_search_url(query, offset):
         encoded = urllib.parse.quote(query)
         return f"https://duckduckgo.com/html/?q={encoded}&s={offset}"
+
+    @staticmethod
+    def _extract_duckduckgo_target(url):
+        if "duckduckgo.com/l/?" not in url:
+            return url
+        parsed = urllib.parse.urlparse(url)
+        query_params = urllib.parse.parse_qs(parsed.query)
+        if "uddg" in query_params:
+            return urllib.parse.unquote(query_params["uddg"][0])
+        return url
 
     @staticmethod
     def _is_uae_domain(domain, url):

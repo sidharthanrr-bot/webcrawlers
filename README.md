@@ -24,10 +24,10 @@ pip install scrapy
 
 2. Upload this repository (or just the `uae_esg_spider.py` file) to your Colab workspace.
 
-3. Run the spider:
+3. Run the spider (note the `!` prefix for Colab shell cells):
 
 ```bash
-scrapy runspider uae_esg_spider.py -o results.json
+!scrapy runspider uae_esg_spider.py -o results.json
 ```
 
 ### Optional arguments
@@ -35,15 +35,30 @@ scrapy runspider uae_esg_spider.py -o results.json
 You can tune limits to avoid large crawls:
 
 ```bash
-scrapy runspider uae_esg_spider.py \
+!scrapy runspider uae_esg_spider.py \
   -a max_search_pages=2 \
   -a max_pages_per_domain=15 \
   -a max_depth=2 \
   -o results.json
 ```
 
+If you want to run from a Python cell, patch the event loop first:
+
+```python
+import nest_asyncio
+nest_asyncio.apply()
+
+from scrapy.crawler import CrawlerProcess
+from uae_esg_spider import UaeEsgSpider
+
+process = CrawlerProcess()
+process.crawl(UaeEsgSpider)
+process.start()
+```
+
 ## Notes
 
 - The spider respects `robots.txt` by default.
+- If your crawl returns 0 items with many `robotstxt/forbidden` logs (often from DuckDuckGo redirects), try a smaller run and (only if permitted) override with `-s ROBOTSTXT_OBEY=False`.
 - Search results depend on DuckDuckGo availability and may vary.
 - For large-scale crawling, consider using a dedicated search API and stricter filtering.
