@@ -58,7 +58,8 @@ process.start()
 
 ## Notes
 
-- The spider respects `robots.txt` by default.
+- The spider disables `robots.txt` filtering by default to reduce empty-result runs in notebook demos (enable it with `-s ROBOTSTXT_OBEY=True` if you need strict compliance).
 - If your crawl returns 0 items with many `robotstxt/forbidden` logs (often from DuckDuckGo redirects), try a smaller run and (only if permitted) override with `-s ROBOTSTXT_OBEY=False`.
+- Output rows now include `company_name`, `domain`, `url`, `title`, `query`, and `matched_keywords`.
 - Search results depend on DuckDuckGo availability and may vary.
 - For large-scale crawling, consider using a dedicated search API and stricter filtering.

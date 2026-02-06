@@ -11,11 +11,11 @@ class UaeEsgSpider(scrapy.Spider):
 
     custom_settings = {
         "USER_AGENT": "Mozilla/5.0 (compatible; UaeEsgSpider/1.0; +https://example.com)",
-        "ROBOTSTXT_OBEY": True,
-        "DOWNLOAD_DELAY": 1.0,
+        "ROBOTSTXT_OBEY": False,
+        "DOWNLOAD_DELAY": 0.5,
         "AUTOTHROTTLE_ENABLED": True,
-        "AUTOTHROTTLE_START_DELAY": 1.0,
-        "AUTOTHROTTLE_MAX_DELAY": 10.0,
+        "AUTOTHROTTLE_START_DELAY": 0.5,
+        "AUTOTHROTTLE_MAX_DELAY": 8.0,
         "LOG_LEVEL": "INFO",
     }
 
@@ -38,8 +38,8 @@ class UaeEsgSpider(scrapy.Spider):
         "climate strategy",
         "net zero",
         "net-zero",
-        "net zero by",
         "decarbonization",
+        "decarbonisation",
         "carbon reduction",
         "carbon footprint",
         "greenhouse gas",
@@ -64,7 +64,6 @@ class UaeEsgSpider(scrapy.Spider):
         "human rights",
         "diversity and inclusion",
         "diversity, equity and inclusion",
-        "dei",
         "occupational health and safety",
         "health and safety",
         "employee wellbeing",
@@ -97,6 +96,7 @@ class UaeEsgSpider(scrapy.Spider):
         super().__init__(*args, **kwargs)
         self.domain_counts = defaultdict(int)
         self.domain_seen = set()
+        self.visited_urls = set()
 
         if "max_search_pages" in kwargs:
             self.max_search_pages = int(kwargs["max_search_pages"])
@@ -117,31 +117,66 @@ class UaeEsgSpider(scrapy.Spider):
             for page in range(self.max_search_pages):
                 offset = page * 30
                 search_url = self._duckduckgo_search_url(query, offset)
-                yield Request(search_url, callback=self.parse_search, meta={"query": query})
+                yield Request(search_url, callback=self.parse_search, meta={"query": query}, dont_filter=True)
 
     def parse_search(self, response):
-        result_links = response.css("a.result__a::attr(href)").getall()
-        for link in result_links:
-            url = self._extract_duckduckgo_target(response.urljoin(link))
-            domain = urllib.parse.urlparse(url).netloc
+        selectors = [
+            "a.result__a::attr(href)",
+            "a[data-testid='result-title-a']::attr(href)",
+            "article[data-testid='result'] a::attr(href)",
+            "a[href*='uddg=']::attr(href)",
+        ]
+
+        links = []
+        for selector in selectors:
+            links.extend(response.css(selector).getall())
+
+        unique_links = []
+        seen = set()
+        for link in links:
+            if link in seen:
+                continue
+            seen.add(link)
+            unique_links.append(link)
+
+        for link in unique_links:
+            raw_url = response.urljoin(link)
+            url = self._extract_duckduckgo_target(raw_url)
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in {"http", "https"}:
+                continue
+
+            domain = self._normalize_domain(parsed.netloc)
             if not domain:
                 continue
             if not self._is_uae_domain(domain, url):
                 continue
             if domain in self.domain_seen:
                 continue
+
             self.domain_seen.add(domain)
-            yield Request(url, callback=self.parse_company, meta={"domain": domain, "depth": 0})
+            yield Request(
+                url,
+                callback=self.parse_company,
+                meta={"domain": domain, "depth": 0, "query": response.meta.get("query")},
+                dont_filter=True,
+            )
 
     def parse_company(self, response):
-        domain = response.meta.get("domain")
         depth = response.meta.get("depth", 0)
+        current_domain = self._normalize_domain(urllib.parse.urlparse(response.url).netloc)
+        domain = response.meta.get("domain") or current_domain
 
         if not domain:
-            domain = urllib.parse.urlparse(response.url).netloc
+            return
 
         if self.domain_counts[domain] >= self.max_pages_per_domain:
             return
+
+        clean_url = self._strip_fragment(response.url)
+        if clean_url in self.visited_urls:
+            return
+        self.visited_urls.add(clean_url)
 
         self.domain_counts[domain] += 1
 
@@ -152,7 +187,9 @@ class UaeEsgSpider(scrapy.Spider):
             yield {
                 "url": response.url,
                 "domain": domain,
+                "company_name": self._extract_company_name(response),
                 "title": response.css("title::text").get(default="").strip(),
+                "query": response.meta.get("query"),
                 "matched_keywords": matched_keywords,
             }
 
@@ -161,24 +198,29 @@ class UaeEsgSpider(scrapy.Spider):
 
         for href in response.css("a::attr(href)").getall():
             next_url = response.urljoin(href)
-            next_domain = urllib.parse.urlparse(next_url).netloc
+            parsed_next = urllib.parse.urlparse(next_url)
+            if parsed_next.scheme not in {"http", "https"}:
+                continue
+
+            next_domain = self._normalize_domain(parsed_next.netloc)
             if next_domain != domain:
                 continue
+
             if self.domain_counts[domain] >= self.max_pages_per_domain:
                 break
+
+            if self._strip_fragment(next_url) in self.visited_urls:
+                continue
+
             yield Request(
                 next_url,
                 callback=self.parse_company,
-                meta={"domain": domain, "depth": depth + 1},
+                meta={"domain": domain, "depth": depth + 1, "query": response.meta.get("query")},
             )
 
     def _match_keywords(self, text):
         normalized = re.sub(r"\s+", " ", text.lower())
-        matched = []
-        for keyword in self.keywords:
-            if keyword in normalized:
-                matched.append(keyword)
-        return matched
+        return [keyword for keyword in self.keywords if keyword in normalized]
 
     @staticmethod
     def _duckduckgo_search_url(query, offset):
@@ -187,18 +229,55 @@ class UaeEsgSpider(scrapy.Spider):
 
     @staticmethod
     def _extract_duckduckgo_target(url):
-        if "duckduckgo.com/l/?" not in url:
-            return url
         parsed = urllib.parse.urlparse(url)
         query_params = urllib.parse.parse_qs(parsed.query)
-        if "uddg" in query_params:
+
+        if "uddg" in query_params and query_params["uddg"]:
             return urllib.parse.unquote(query_params["uddg"][0])
+
+        if "rut" in query_params and query_params["rut"]:
+            return urllib.parse.unquote(query_params["rut"][0])
+
         return url
+
+    @staticmethod
+    def _normalize_domain(domain):
+        domain = (domain or "").lower().strip()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
+
+    @staticmethod
+    def _strip_fragment(url):
+        parsed = urllib.parse.urlparse(url)
+        return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ""))
+
+    @staticmethod
+    def _extract_company_name(response):
+        candidates = [
+            response.css("meta[property='og:site_name']::attr(content)").get(),
+            response.css("meta[name='application-name']::attr(content)").get(),
+            response.css("title::text").get(),
+        ]
+        for value in candidates:
+            if value and value.strip():
+                return value.strip()
+        return ""
 
     @staticmethod
     def _is_uae_domain(domain, url):
         if domain.endswith(".ae"):
             return True
-        if ".ae/" in url or ".ae?" in url:
-            return True
-        return False
+
+        lowered = url.lower()
+        uae_tokens = [
+            "/uae",
+            "-uae",
+            ".ae/",
+            ".ae?",
+            "dubai",
+            "abu-dhabi",
+            "abudhabi",
+            "sharjah",
+        ]
+        return any(token in lowered for token in uae_tokens)
